@@ -19,20 +19,21 @@ def forward(X, num_layers, root_size, dropout_keep=None):
     :return: the network
     """
     net = X - 0.5
-    net = net[:, :, :, np.newaxis]
     # net = tf.layers.conv2d(net, 3, (1, 1), name="color_space_adjust")
 
     num_filters = root_size
     conv = []
 
     # Contracting path
+    conv_filter_size = (7, 7)
     for layer_i in range(num_layers):
         if dropout_keep is not None:
             net = tf.nn.dropout(net, dropout_keep)
 
         with tf.variable_scope("conv_{}".format(layer_i)):
-            net = tf.layers.conv2d(net, num_filters, (7, 7), padding='valid', name="conv1")
+            net = tf.layers.conv2d(net, num_filters, conv_filter_size, padding='valid', name="conv1")
             net = tf.nn.relu(net, name="relu1")
+            tf.Print(net, [net])
 
         conv.append(net)
 
@@ -60,11 +61,12 @@ def forward(X, num_layers, root_size, dropout_keep=None):
         net = tf.concat([traverse_crop, net], axis=3, name="concat")
 
         with tf.variable_scope("conv_{}".format(num_layers + layer_i)):
-            net = tf.layers.conv2d(net, num_filters, (7, 7), padding='valid', name="conv1")
+            net = tf.layers.conv2d(net, num_filters, conv_filter_size, padding='valid', name="conv1")
             net = tf.nn.relu(net, name="relu1")
 
     assert len(conv) == 0
 
+    # Output layer
     net = tf.layers.conv2d(net, 1, (1, 1), padding='same', name="weight_output")
 
     return net
@@ -73,16 +75,8 @@ def forward(X, num_layers, root_size, dropout_keep=None):
 def input_size_needed(output_size, num_layers):
     """Utility function to compute image size for a given U-Net output
 
-    The U-Net crops some border of the image during prediction, it can be tedious to check if an input size is valid
     output_size: width/height of the output image
     num_layer: number of layers
     """
-    for i in range(num_layers - 1):
-        assert output_size % 2 == 0, 'expand layer {} has size {} not divisible by 2' \
-            .format(num_layers - i, output_size)
-        output_size = (output_size + 4) / 2
-
-    for i in range(num_layers - 1):
-        output_size = (output_size + 4) * 2
-
-    return int(output_size + 4)
+    # TODO: change from fixed value, need to keep track of cnn structure
+    return 108
