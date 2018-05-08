@@ -116,3 +116,8 @@ def images_from_patches(patches, image_shape, stride=None):
 
     return images
 
+def snr(labels, prediction):
+    numerator = np.sum(np.square(labels))
+    denominator = np.sum(np.square(labels - prediction))
+    return 10*np.log10(numerator / denominator)
+

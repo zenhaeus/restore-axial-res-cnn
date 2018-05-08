@@ -204,9 +204,7 @@ class ConvolutionalModel:
             patches: [num_patches, patch_height, patch_width]
             imgs: [num_images, img_height, img_width]
         """
-        snr = np.sum(np.square(train_images))
-        snr = snr / np.sum(np.square(train_images - downsampled_train_images))
-        print("Initial SNR: {}".format(10*np.log10(snr)))
+        print("Initial SNR: {}".format(images.snr(train_images, downsampled_train_images)))
         opts = self._options
 
         num_train_patches = patches.shape[0]
@@ -235,9 +233,7 @@ class ConvolutionalModel:
             print("Batch {} Step {}".format(batch_i, step), end="\r")
             self._summary.add(summary_str, global_step=step)
 
-            snr = np.sum(np.square(labels_patches[batch_indices]))
-            snr = snr / np.sum(np.square(labels_patches[batch_indices] - predictions))
-            snr = 10*np.log10(snr)
+            snr = images.snr(labels_patches[batch_indices], predictions)
             self._summary.add_to_snr_summary(snr, self._global_step)
 
             if step > 0 and step % 2000 == 0:
