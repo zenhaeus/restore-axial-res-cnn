@@ -47,23 +47,25 @@ def extract_patches(images, patch_size, stride=4, channels=1):
 
     return patches
 
-def downsample_patches(patches, downsample_factor=10, keep_lines_between=True):
+def downsample_patches(patches, downsample_factor, keep_lines_between=True):
     """Generate downsampled version of each patch in patches
 
     patches: patches to be downsampled
     downsample_factor: 
     """
+    downsampled_patches = np.zeros_like(patches)
+    new_shape = list(downsampled_patches.shape)
+    new_shape[0] = downsample_factor * new_shape[0]
+    new_shape[1] = int(new_shape[1] / downsample_factor)
+    downsampled_patches = np.resize(downsampled_patches, tuple(new_shape))
 
-    # TODO: extend this to generate y axis downsampling as well as 1 and 2 offset downsampling
-    #samples = patches.copy()
-    #if keep_lines_between:
-    #    for i in range(downsample_factor-1):
-    #        samples[:, i::downsample_factor, :] = 0
-    #else:
-    #    return samples[:, 2::downsample_factor, :]
+    for i in range(downsample_factor):
+        temp = patches[:, i::downsample_factor, :]
+        if temp.shape[1] != new_shape[1]:
+            temp = np.delete(temp, new_shape[1], 1)
+        downsampled_patches[i * patches.shape[0]: (i + 1) * patches.shape[0]] = temp
 
-    #return samples
-    return patches[:, ::downsample_factor, :]
+    return downsampled_patches
 
 def img_float_to_uint8(img):
     """Transform an array of float images into uint8 images"""
@@ -88,19 +90,6 @@ def images_from_patches(patches, image_shape, stride=None):
 
     images = np.zeros(shape=image_shape, dtype=patches.dtype)
     count_hits = np.zeros(shape=images.shape, dtype=np.uint64)
-
-    #for n in range(0, image_shape[0]):
-    #    patch_idx = 0
-    #    for x in range(0, image_shape[1] - patch_size + 1, stride):
-    #        for y in range(0, image_shape[2] - patch_size + 1, stride):
-    #            #print("Images shape: ", images.shape)
-    #            #print("Image area coords : ", n, x, x + patch_size, y, y + patch_size)
-    #            #print("Image area shape : ", images[n, x:x + patch_size, y:y + patch_size].shape)
-    #            print("Patches shape: ", patches.shape)
-    #            print("Patches idx: ", patch_idx, " n: ", n)
-    #            images[n, x:x + patch_size, y:y + patch_size] += patches[n, patch_idx]
-    #            count_hits[n, x:x + patch_size, y:y + patch_size] += 1
-    #            patch_idx += 1
 
     for n in range(0, image_shape[0]):
         patch_idx = 0

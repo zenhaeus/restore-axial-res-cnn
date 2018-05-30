@@ -1,11 +1,6 @@
 """
 
 """
-import os
-
-import logging
-logging.getLogger('tensorflow').disabled = True
-
 import tensorflow as tf
 import numpy as np
 
@@ -15,21 +10,27 @@ import images
 from summary import Summary
 from datetime import datetime
 
+import os
+
+import logging
+logging.getLogger('tensorflow').disabled = True
+
 # Set logging level
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
 tf.logging.set_verbosity(tf.logging.WARN)
 
 tf.app.flags.DEFINE_integer('gpu', 0, "GPU to run the model on")
-tf.app.flags.DEFINE_integer('batch_size', 25, "Batch size of training instances")
+tf.app.flags.DEFINE_integer('batch_size', 20, "Batch size of training instances")
 # Valid sizes: [4, 36, 68, 100, 132, 164, 196, 228, 260, 292, 324, 356, 388, 420, 452, 484]
 # maybe something around 32
 tf.app.flags.DEFINE_integer('patch_size', 46, "Size of the prediction image")
 tf.app.flags.DEFINE_integer('stride', 32, "Sliding delta for patches")
 tf.app.flags.DEFINE_integer('seed', 2018, "Random seed for reproducibility")
 tf.app.flags.DEFINE_integer('root_size', 16, "Number of filters of the first U-Net layer")
-tf.app.flags.DEFINE_integer('num_epoch', 50, "Number of pass on the dataset during training")
+tf.app.flags.DEFINE_integer('num_epoch', 20, "Number of pass on the dataset during training")
 tf.app.flags.DEFINE_integer('num_layers', 3, "Number of layers of the U-Net")
 tf.app.flags.DEFINE_integer('train_score_every', 1000, "Compute training score after the given number of iterations")
+tf.app.flags.DEFINE_integer('downsample_factor', 3, "Determines the factor by which training images are downsampled for training")
 
 tf.app.flags.DEFINE_float('learning_rate', 0.01, "Initial learning rate")
 tf.app.flags.DEFINE_float('momentum', 0.9, "Momentum")
@@ -38,6 +39,7 @@ tf.app.flags.DEFINE_float('dropout', 0.8, "Probability to keep an input")
 tf.app.flags.DEFINE_string('logdir', os.path.abspath("./logdir"), "Directory where to write logfiles")
 tf.app.flags.DEFINE_string('save_path', os.path.abspath("./runs"),
                            "Directory where to write checkpoints, overlays and submissions")
+tf.app.flags.DEFINE_string('data', os.path.abspath("../data/Membrane_.tif"), "Data to learn on")
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -60,13 +62,14 @@ class Options(object):
         self.num_epoch = FLAGS.num_epoch
         self.num_layers = FLAGS.num_layers
         self.train_score_every = FLAGS.train_score_every
+        self.downsample_factor = FLAGS.downsample_factor
+        self.data = FLAGS.data
 
 class ConvolutionalModel:
     def __init__(self, options, session):
         self._options = options
         self._session = session
 
-        # TODO: review if necessary
         self.train_images_shape = None
 
         np.random.seed(options.seed)
@@ -76,14 +79,13 @@ class ConvolutionalModel:
 
         self.experiment_name = datetime.now().strftime("%Y-%m-%dT%Hh%Mm%Ss")
         experiment_path = os.path.abspath(os.path.join(options.save_path, self.experiment_name))
-        summary_path = os.path.join(options.logdir, self.experiment_name)
+        self.summary_path = os.path.join(options.logdir, self.experiment_name)
 
-        self._summary = Summary(options, session, summary_path)
-
+        self._summary = Summary(options, session)
         self.build_graph()
 
     def calculate_loss_abs(self, labels, pred_logits):
-        """
+        """Calculate absolute difference loss
 
         """
         loss = tf.losses.absolute_difference(
@@ -94,7 +96,7 @@ class ConvolutionalModel:
         return loss
 
     def calculate_loss_mse(self, labels, pred_logits):
-        """
+        """Calculate mean squared error loss
 
         """
         loss = tf.losses.mean_squared_error(
@@ -104,8 +106,18 @@ class ConvolutionalModel:
 
         return loss
 
-    def optimize(self, loss):
+    def calculate_loss_snr(self, labels, pred_logits):
+        """Calculate loss based on signal to noise
         """
+        loss = tf.negative(
+            tf.log(tf.divide(
+                tf.reduce_sum(tf.square(labels)),
+                tf.reduce_sum(tf.square(labels - pred_logits)))),
+            name="snr")
+        return loss
+
+    def optimize(self, loss):
+        """optimize with MomentumOptimizer
 
         """
         learning_rate = tf.train.exponential_decay(
@@ -122,7 +134,9 @@ class ConvolutionalModel:
         return train, learning_rate
 
     def adam_optimize(self, loss):
-        optimizer = tf.train.AdamOptimizer(self._options.learning_rate, epsilon=1.0)
+        """ optimize with AdamOptimizer
+        """
+        optimizer = tf.train.AdamOptimizer(self._options.learning_rate, epsilon=10e-3)
         train = optimizer.minimize(loss, global_step=self._global_step)
 
         return train, 0
@@ -174,7 +188,7 @@ class ConvolutionalModel:
         predictions = predict_logits
 
         print("Predicted logits: {}".format(predict_logits))
-        loss = self.calculate_loss_abs(labels_node, predict_logits)
+        loss = self.calculate_loss_snr(labels_node, predict_logits)
 
         self._train, self._learning_rate = self.adam_optimize(loss)
 
@@ -184,6 +198,7 @@ class ConvolutionalModel:
         self._labels_node = labels_node
         self._predict_logits = predict_logits
 
+        self._summary.create_writer(self.summary_path)
         self._summary.initialize_train_summary()
         self._summary.initialize_snr_summary()
         self._summary.initialize_eval_summary()
@@ -204,8 +219,10 @@ class ConvolutionalModel:
             patches: [num_patches, patch_height, patch_width]
             imgs: [num_images, img_height, img_width]
         """
-        print("Initial SNR: {}".format(images.snr(train_images, downsampled_train_images)))
         opts = self._options
+        downsampled_train_images[downsampled_train_images < 0] = 0
+        patches[patches < 0] = 0
+        print("Initial SNR: {}".format(images.snr(train_images, downsampled_train_images)))
 
         num_train_patches = patches.shape[0]
 
@@ -236,14 +253,19 @@ class ConvolutionalModel:
             snr = images.snr(labels_patches[batch_indices], predictions)
             self._summary.add_to_snr_summary(snr, self._global_step)
 
-            if step > 0 and step % 2000 == 0:
-                pred_from = int(train_images.shape[0] / 2)
-                pred_to = int(train_images.shape[0] / 2) + 1
-                images_to_predict = downsampled_train_images[pred_from:pred_to, :, :, :]
-                predictions = self.predict(images_to_predict)
+            if step > 0 and step % 2000 == 1:
+                #pred_from = int(train_images.shape[0] / 2)
+                #pred_to = int(train_images.shape[0] / 2) + 1
+                #images_to_predict = downsampled_train_images[pred_from:pred_to, :, :, :]
+                predictions = self.predict(downsampled_train_images)
 
                 # TODO: add prediction quality measures to summary
-                self._summary.add_to_eval_summary(train_images[pred_from:pred_to, :, :, :], images_to_predict, predictions, self._global_step)
+                self._summary.add_to_eval_summary(
+                    train_images,
+                    downsampled_train_images,
+                    predictions,
+                    self._global_step
+                )
 
         self._summary.flush()
 
@@ -286,9 +308,9 @@ class ConvolutionalModel:
         patches_per_image = int(num_patches / num_images)
 
         # construct masks
-        # TODO: generate image from patches
         new_shape = (num_images, patches_per_image, opts.patch_size, opts.patch_size, 1)
         predictions = images.images_from_patches(eval_predictions.reshape(new_shape), imgs.shape, stride=opts.stride)
+        predictions[predictions < 0] = 0
 
         return predictions
 
@@ -321,14 +343,17 @@ def main(_):
 
         if opts.num_epoch > 0:
             # train model
-            # TODO: make path to data a flag
-            train_images = images.load_data("../data/Membrane_.tif")[20:50]
+            train_images = images.load_data(os.path.abspath(opts.data))#[20:50]
             model.train_images_shape = train_images.shape
 
-            input_size = 108
-            big_patches = images.extract_patches(train_images, input_size, opts.stride)
-            margin = int((input_size - opts.patch_size) / 2)
-            labels_patches = big_patches[:,margin:opts.patch_size+margin, margin:opts.patch_size+margin]
+            big_patches = images.extract_patches(train_images, model.input_size, opts.stride)
+            margin = int((model.input_size - opts.patch_size) / 2)
+            labels_patches = big_patches[:, margin:opts.patch_size+margin, margin:opts.patch_size+margin]
+
+            # resize labels_patches to compensate for downsampling
+            labels_patches = np.tile(labels_patches, (opts.downsample_factor, 1, 1, 1))
+
+
 
             print("Train on {} labels_patches of size {}x{}".format(
                 labels_patches.shape[0],
@@ -336,12 +361,11 @@ def main(_):
                 labels_patches.shape[2]
             ))
 
-            patches = images.downsample_patches(big_patches)
+            patches = images.downsample_patches(big_patches, opts.downsample_factor)
             patches = tf.image.resize_images(
-                    patches,
-                    np.array([input_size, input_size]),
-                    method=tf.image.ResizeMethod.BICUBIC
-            )
+                patches,
+                np.array([model.input_size, model.input_size]),
+                method=tf.image.ResizeMethod.BICUBIC)
 
 
             print("Train on {} patches of size {}x{}".format(
@@ -350,20 +374,22 @@ def main(_):
                 patches.shape[2]
             ))
 
-            downsampled_train_images = images.downsample_patches(train_images)
-            downsampled_train_images = tf.image.resize_images(
-                    downsampled_train_images,
-                    np.array([train_images.shape[1], train_images.shape[2]]),
-                    method=tf.image.ResizeMethod.BICUBIC
+            downsampled_train_images = images.downsample_patches(train_images[120:121], opts.downsample_factor)[0:1]
+            downsampled_train_images = tf.image.resize_bicubic(
+                downsampled_train_images,
+                np.array([model.train_images_shape[1], model.train_images_shape[2]]),
+                align_corners=True
             )
+            # resize train_images to compensate for downsampling
+            train_images = np.tile(train_images, (opts.downsample_factor, 1, 1, 1))
+
 
             for i in range(opts.num_epoch):
                 print("==== Train epoch: {} ====".format(i))
                 # Reset scores
                 tf.local_variables_initializer().run()
                 # Process one epoch
-                # TODO: avoid Tensor.eval ?
-                model.train(tf.Tensor.eval(patches), labels_patches, train_images, tf.Tensor.eval(downsampled_train_images))
+                model.train(tf.Tensor.eval(patches), labels_patches, train_images[120:121], downsampled_train_images.eval())
                 # TODO: Save model to disk
                 # model.save(i)
 

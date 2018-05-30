@@ -1,4 +1,5 @@
 # Various things to ignore
+tags
 */logdir/
 */runs/
 *.out

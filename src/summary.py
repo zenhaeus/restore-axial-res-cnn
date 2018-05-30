@@ -7,11 +7,14 @@ class Summary:
         Handle tensorflow summaries.
     """
 
-    def __init__(self, options, session, summary_path):
+    def __init__(self, options, session):
         self._options = options
         self._session = session
-        self._summary_writer = tf.summary.FileWriter(summary_path, session.graph)
         self.summary_ops = []
+        self._summary_writer = None
+
+    def create_writer(self, summary_path):
+        self._summary_writer = tf.summary.FileWriter(summary_path, graph=self._session.graph)
 
     def flush(self):
         """
@@ -35,6 +38,7 @@ class Summary:
         return tf.summary.merge(self.summary_ops)
 
     def initialize_train_summary(self):
+        # TODO: rework this for validation statistics
         self._train_predictions = tf.placeholder(tf.float32, name="train_predictions")
         self._train_labels = tf.placeholder(tf.float32, name="train_labels")
 
@@ -52,17 +56,17 @@ class Summary:
     def initialize_eval_summary(self):
         opts = self._options
         num_eval_images = 2
-        self._groundtruth_to_display = tf.placeholder(tf.float32, name="groundtruth_display")
+        self._groundtruth = tf.placeholder(tf.float32, name="groundtruth")
         self._image_summary = [
-            tf.summary.image('eval_groundtruth', self._groundtruth_to_display, max_outputs=num_eval_images)]
+            tf.summary.image('Groundtruth', self._groundtruth, max_outputs=num_eval_images)]
 
-        self._images_to_display = tf.placeholder(tf.float32, name="image_display")
+        self._downsampled = tf.placeholder(tf.float32, name="downsampled")
         self._image_summary.append(
-            tf.summary.image('eval_images', self._images_to_display, max_outputs=num_eval_images))
+            tf.summary.image('Downsampled', self._downsampled, max_outputs=num_eval_images))
 
-        self._labels_to_display = tf.placeholder(tf.float32, name="label_display")
+        self._predictions = tf.placeholder(tf.float32, name="prediction")
         self._image_summary.append(
-            tf.summary.image('eval_labels', self._labels_to_display, max_outputs=num_eval_images))
+            tf.summary.image('Prediction', self._predictions, max_outputs=num_eval_images))
 
         self._image_summary = tf.summary.merge(self._image_summary)
 
@@ -70,6 +74,7 @@ class Summary:
     def initialize_snr_summary(self):
         self._snr = tf.placeholder(tf.float64, name='snr')
         self._snr_summary = tf.summary.scalar('SNR', self._snr)
+
 
     def add_to_training_summary(self, predictions, labels, global_step):
         train_predictions = predictions
@@ -91,17 +96,13 @@ class Summary:
         )
         self._summary_writer.add_summary(snr, global_step=step)
 
-    def add_to_eval_summary(self, groundtruth, images_to_predict, predictions, global_step):
+    def add_to_eval_summary(self, groundtruth, downsampled, predictions, global_step):
         opts = self._options
 
-        img = images.img_float_to_uint8(groundtruth)
-        disp_img = images.img_float_to_uint8(images_to_predict)
-        labl_img = images.img_float_to_uint8(predictions)
-
         feed_dict_eval = {
-            self._groundtruth_to_display: img,
-            self._images_to_display: disp_img,
-            self._labels_to_display: labl_img
+            self._groundtruth: groundtruth,
+            self._downsampled: downsampled,
+            self._predictions: predictions
         }
 
         image_sum, step = self._session.run([self._image_summary, global_step],
