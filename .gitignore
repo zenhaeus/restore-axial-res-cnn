@@ -5,6 +5,8 @@ tags
 *.out
 data/
 reading/
+src/remarks.md
+notebooks
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
