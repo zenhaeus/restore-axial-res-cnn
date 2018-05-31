@@ -20,10 +20,8 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
 tf.logging.set_verbosity(tf.logging.WARN)
 
 tf.app.flags.DEFINE_integer('gpu', 0, "GPU to run the model on")
-tf.app.flags.DEFINE_integer('batch_size', 20, "Batch size of training instances")
-# Valid sizes: [4, 36, 68, 100, 132, 164, 196, 228, 260, 292, 324, 356, 388, 420, 452, 484]
-# maybe something around 32
-tf.app.flags.DEFINE_integer('patch_size', 46, "Size of the prediction image")
+tf.app.flags.DEFINE_integer('batch_size', 5, "Batch size of training instances")
+tf.app.flags.DEFINE_integer('patch_size', 108, "Size of the prediction image")
 tf.app.flags.DEFINE_integer('stride', 32, "Sliding delta for patches")
 tf.app.flags.DEFINE_integer('seed', 2018, "Random seed for reproducibility")
 tf.app.flags.DEFINE_integer('root_size', 16, "Number of filters of the first U-Net layer")
@@ -32,14 +30,15 @@ tf.app.flags.DEFINE_integer('num_layers', 3, "Number of layers of the U-Net")
 tf.app.flags.DEFINE_integer('train_score_every', 1000, "Compute training score after the given number of iterations")
 tf.app.flags.DEFINE_integer('downsample_factor', 3, "Determines the factor by which training images are downsampled for training")
 
-tf.app.flags.DEFINE_float('learning_rate', 0.01, "Initial learning rate")
+tf.app.flags.DEFINE_float('learning_rate', 0.001, "Initial learning rate")
 tf.app.flags.DEFINE_float('momentum', 0.9, "Momentum")
-tf.app.flags.DEFINE_float('dropout', 0.8, "Probability to keep an input")
+tf.app.flags.DEFINE_float('dropout', 0.9, "Probability to keep an input")
 
 tf.app.flags.DEFINE_string('logdir', os.path.abspath("./logdir"), "Directory where to write logfiles")
 tf.app.flags.DEFINE_string('save_path', os.path.abspath("./runs"),
                            "Directory where to write checkpoints, overlays and submissions")
 tf.app.flags.DEFINE_string('data', os.path.abspath("../data/Membrane_.tif"), "Data to learn on")
+tf.app.flags.DEFINE_string('log_suffix', os.path.abspath(""), "suffix to attach to log folder")
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -64,6 +63,7 @@ class Options(object):
         self.train_score_every = FLAGS.train_score_every
         self.downsample_factor = FLAGS.downsample_factor
         self.data = FLAGS.data
+        self.log_suffix = FLAGS.log_suffix
 
 class ConvolutionalModel:
     def __init__(self, options, session):
@@ -75,11 +75,11 @@ class ConvolutionalModel:
         np.random.seed(options.seed)
         tf.set_random_seed(options.seed)
         #self.input_size = unet.input_size_needed(options.patch_size, options.num_layers)
-        self.input_size = 108
+        self.input_size = self._options.patch_size
 
         self.experiment_name = datetime.now().strftime("%Y-%m-%dT%Hh%Mm%Ss")
         experiment_path = os.path.abspath(os.path.join(options.save_path, self.experiment_name))
-        self.summary_path = os.path.join(options.logdir, self.experiment_name)
+        self.summary_path = os.path.join(options.logdir, self.experiment_name + options.log_suffix)
 
         self._summary = Summary(options, session)
         self.build_graph()
@@ -139,7 +139,7 @@ class ConvolutionalModel:
         optimizer = tf.train.AdamOptimizer(self._options.learning_rate, epsilon=10e-3)
         train = optimizer.minimize(loss, global_step=self._global_step)
 
-        return train, 0
+        return train, optimizer._lr
 
     def build_graph(self):
         """
@@ -253,10 +253,11 @@ class ConvolutionalModel:
             snr = images.snr(labels_patches[batch_indices], predictions)
             self._summary.add_to_snr_summary(snr, self._global_step)
 
-            if step > 0 and step % 2000 == 1:
+            #if step > 0 and step % 2000 == 1:
                 #pred_from = int(train_images.shape[0] / 2)
                 #pred_to = int(train_images.shape[0] / 2) + 1
                 #images_to_predict = downsampled_train_images[pred_from:pred_to, :, :, :]
+            if step > 0 and step % int(patches.shape[0] / opts.batch_size) == 0:
                 predictions = self.predict(downsampled_train_images)
 
                 # TODO: add prediction quality measures to summary
@@ -390,6 +391,8 @@ def main(_):
                 tf.local_variables_initializer().run()
                 # Process one epoch
                 model.train(tf.Tensor.eval(patches), labels_patches, train_images[120:121], downsampled_train_images.eval())
+                memop = tf.contrib.memory_stats.MaxBytesInUse()
+                print("Memory in use {:.2f} GB".format(memop.eval()/10**9))
                 # TODO: Save model to disk
                 # model.save(i)
 

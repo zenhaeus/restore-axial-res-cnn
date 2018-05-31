@@ -84,8 +84,8 @@ def images_from_patches(patches, image_shape, stride=None):
         stride = patch_size
 
     # TODO: pass input size and replace 108 with it
-    num_x_patches = len(range(0, image_shape[1] - 108, stride))
-    num_y_patches = len(range(0, image_shape[2] - 108, stride))
+    num_x_patches = len(range(0, image_shape[1] - patch_size, stride))
+    num_y_patches = len(range(0, image_shape[2] - patch_size, stride))
     patches_per_image = int(num_patches / image_shape[0])
 
     images = np.zeros(shape=image_shape, dtype=patches.dtype)

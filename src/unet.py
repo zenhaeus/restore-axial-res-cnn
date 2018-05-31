@@ -19,25 +19,28 @@ def forward(X, num_layers, root_size, dropout_keep=None):
     :return: the network
     """
     net = X - 0.5
-    # net = tf.layers.conv2d(net, 3, (1, 1), name="color_space_adjust")
 
     num_filters = root_size
     conv = []
 
     # Contracting path
-    conv_filter_size = (7, 7)
+    conv_filter_size = (3, 3)
+    conv_filter_size_2 = (7, 7)
     for layer_i in range(num_layers):
         if dropout_keep is not None:
             net = tf.nn.dropout(net, dropout_keep)
 
         with tf.variable_scope("conv_{}".format(layer_i)):
-            net = tf.layers.conv2d(net, num_filters, conv_filter_size, padding='valid', name="conv1")
+            net = tf.layers.conv2d(net, num_filters, conv_filter_size, padding='same', name="conv1")
             net = tf.nn.relu(net, name="relu1")
+            net = tf.layers.conv2d(net, num_filters, conv_filter_size_2, dilation_rate=(2, 2), padding='same', name="conv2")
+            net = tf.nn.relu(net, name="relu2")
             tf.Print(net, [net])
 
         conv.append(net)
 
-        net = tf.layers.max_pooling2d(net, (2, 2), strides=(2, 2), name="pool")
+        if layer_i < num_layers - 1:
+            net = tf.layers.max_pooling2d(net, (2, 2), strides=(2, 2), name="pool")
 
         num_filters *= 2
 
@@ -61,8 +64,10 @@ def forward(X, num_layers, root_size, dropout_keep=None):
         net = tf.concat([traverse_crop, net], axis=3, name="concat")
 
         with tf.variable_scope("conv_{}".format(num_layers + layer_i)):
-            net = tf.layers.conv2d(net, num_filters, conv_filter_size, padding='valid', name="conv1")
+            net = tf.layers.conv2d(net, num_filters, conv_filter_size, padding='same', name="conv1")
             net = tf.nn.relu(net, name="relu1")
+            net = tf.layers.conv2d(net, num_filters, conv_filter_size_2, dilation_rate=(2, 2), padding='same', name="conv2")
+            net = tf.nn.relu(net, name="relu2")
 
     assert len(conv) == 0
 
