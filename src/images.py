@@ -10,7 +10,7 @@ def load_data(path, channels=1):
 
     if type(img) is PIL.TiffImagePlugin.TiffImageFile:
         n_frames = img.n_frames
-        images = np.empty(shape=(n_frames, img.size[1], img.size[0], channels))
+        images = np.empty(shape=(n_frames, img.size[1], img.size[0], channels), dtype=np.float32)
 
         # iterate frames in multipage tiff
         for i in range(n_frames):
@@ -37,7 +37,7 @@ def extract_patches(images, patch_size, stride=4, channels=1):
     y_starts = range(0, y - patch_size, stride)
     num_patches = len(x_starts)*len(y_starts)*z
 
-    patches = np.zeros((num_patches, patch_size, patch_size, channels))
+    patches = np.zeros((num_patches, patch_size, patch_size, channels), dtype=np.float32)
     num_patch = 0
     for iz in range(0, z):
         for ix in x_starts:
@@ -47,12 +47,15 @@ def extract_patches(images, patch_size, stride=4, channels=1):
 
     return patches
 
-def downsample_patches(patches, downsample_factor, keep_lines_between=True):
+def downsample(patches, downsample_factor, get_all_patches=True):
     """Generate downsampled version of each patch in patches
 
     patches: patches to be downsampled
     downsample_factor: 
     """
+    if not get_all_patches:
+        return patches[:, ::downsample_factor, :]
+
     downsampled_patches = np.zeros_like(patches)
     new_shape = list(downsampled_patches.shape)
     new_shape[0] = downsample_factor * new_shape[0]
@@ -72,24 +75,29 @@ def img_float_to_uint8(img):
     return (img * 255).round().astype(np.uint8)
 
 def img_uint8_to_float(img):
+    """Convert uint8 image to float image
+    """
     img = np.array(img, dtype=np.float32)
     img -= np.min(img)
     img *= 1.0 / np.max(img)
     return img
 
 def images_from_patches(patches, image_shape, stride=None):
+    """Generate image from patches
+    """
     num_images, num_patches, patch_size, _, num_channel = patches.shape
 
     if stride is None:
         stride = patch_size
 
-    # TODO: pass input size and replace 108 with it
     num_x_patches = len(range(0, image_shape[1] - patch_size, stride))
     num_y_patches = len(range(0, image_shape[2] - patch_size, stride))
     patches_per_image = int(num_patches / image_shape[0])
 
-    images = np.zeros(shape=image_shape, dtype=patches.dtype)
-    count_hits = np.zeros(shape=images.shape, dtype=np.uint64)
+    #prediction_shape = (num_images, int(image_shape[1] / stride) * stride, int(image_shape[2] / stride) * stride, num_channel)
+    prediction_shape = image_shape
+    images = np.zeros(shape=prediction_shape, dtype=patches.dtype)
+    count_hits = np.zeros(shape=prediction_shape, dtype=np.uint64)
 
     for n in range(0, image_shape[0]):
         patch_idx = 0
@@ -101,12 +109,20 @@ def images_from_patches(patches, image_shape, stride=None):
                 count_hits[n, x_pos:x_pos+patch_size, y_pos:y_pos+patch_size] += 1
                 patch_idx += 1
 
+    # replace zero counts with 1 to avoid division by 0
+    count_hits[count_hits == 0] = 1
+    print("Count hits: ", count_hits)
     images = images / count_hits
 
     return images
 
-def snr(labels, prediction):
-    numerator = np.sum(np.square(labels))
-    denominator = np.sum(np.square(labels - prediction))
-    return 10*np.log10(numerator / denominator)
+def psnr(original, degraded):
+    """ Compute the peak signal-to-noise ratio
+    """
+    assert original.shape == degraded.shape, "Shapes of original and degraded must be identical to calculate PSNR"
 
+
+    numerator = np.sum(np.square(original))
+    denominator = np.sum(np.square(original - degraded))
+
+    return 10 * np.log10(numerator / denominator)

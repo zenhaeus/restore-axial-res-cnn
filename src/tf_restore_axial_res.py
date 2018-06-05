@@ -22,7 +22,7 @@ tf.logging.set_verbosity(tf.logging.WARN)
 tf.app.flags.DEFINE_integer('gpu', 0, "GPU to run the model on")
 tf.app.flags.DEFINE_integer('batch_size', 5, "Batch size of training instances")
 tf.app.flags.DEFINE_integer('patch_size', 108, "Size of the prediction image")
-tf.app.flags.DEFINE_integer('stride', 32, "Sliding delta for patches")
+tf.app.flags.DEFINE_integer('stride', 60, "Sliding delta for patches")
 tf.app.flags.DEFINE_integer('seed', 2018, "Random seed for reproducibility")
 tf.app.flags.DEFINE_integer('root_size', 16, "Number of filters of the first U-Net layer")
 tf.app.flags.DEFINE_integer('num_epoch', 20, "Number of pass on the dataset during training")
@@ -74,7 +74,6 @@ class ConvolutionalModel:
 
         np.random.seed(options.seed)
         tf.set_random_seed(options.seed)
-        #self.input_size = unet.input_size_needed(options.patch_size, options.num_layers)
         self.input_size = self._options.patch_size
 
         self.experiment_name = datetime.now().strftime("%Y-%m-%dT%Hh%Mm%Ss")
@@ -212,7 +211,7 @@ class ConvolutionalModel:
 
         self.saver = tf.train.Saver(max_to_keep=100)
 
-    def train(self, patches, labels_patches, train_images, downsampled_train_images):
+    def train(self, patches, labels_patches, eval_images, downsampled_eval_images):
         """Train the model for one epoch
 
         params:
@@ -220,9 +219,10 @@ class ConvolutionalModel:
             imgs: [num_images, img_height, img_width]
         """
         opts = self._options
-        downsampled_train_images[downsampled_train_images < 0] = 0
+
+        # Fix negative values from downsampling
+        downsampled_eval_images[downsampled_eval_images < 0] = 0
         patches[patches < 0] = 0
-        print("Initial SNR: {}".format(images.snr(train_images, downsampled_train_images)))
 
         num_train_patches = patches.shape[0]
 
@@ -250,20 +250,17 @@ class ConvolutionalModel:
             print("Batch {} Step {}".format(batch_i, step), end="\r")
             self._summary.add(summary_str, global_step=step)
 
-            snr = images.snr(labels_patches[batch_indices], predictions)
+            snr = images.psnr(labels_patches[batch_indices], predictions)
             self._summary.add_to_snr_summary(snr, self._global_step)
 
-            #if step > 0 and step % 2000 == 1:
-                #pred_from = int(train_images.shape[0] / 2)
-                #pred_to = int(train_images.shape[0] / 2) + 1
-                #images_to_predict = downsampled_train_images[pred_from:pred_to, :, :, :]
-            if step > 0 and step % int(patches.shape[0] / opts.batch_size) == 0:
-                predictions = self.predict(downsampled_train_images)
+            # Do evaluation once per epoch
+            if step > 0 and step % int(patches.shape[0] / opts.batch_size) == 1:
+                predictions = self.predict(downsampled_eval_images)
 
                 # TODO: add prediction quality measures to summary
                 self._summary.add_to_eval_summary(
-                    train_images,
-                    downsampled_train_images,
+                    eval_images,
+                    downsampled_eval_images,
                     predictions,
                     self._global_step
                 )
@@ -288,10 +285,10 @@ class ConvolutionalModel:
         num_patches = patches.shape[0]
 
         # patches padding to have full batches
-        if num_patches % opts.batch_size != 0:
-            num_extra_patches = opts.batch_size - (num_patches % opts.batch_size)
-            extra_patches = np.zeros((num_extra_patches, self.input_size, self.input_size, 1))
-            patches = np.concatenate([patches, extra_patches], axis=0)
+        #if num_patches % opts.batch_size != 0:
+        #    num_extra_patches = opts.batch_size - (num_patches % opts.batch_size)
+        #    extra_patches = np.zeros((num_extra_patches, self.input_size, self.input_size, 1))
+        #    patches = np.concatenate([patches, extra_patches], axis=0)
 
         num_batches = int(num_patches / opts.batch_size)
         eval_predictions = np.ndarray(shape=(num_patches, opts.patch_size, opts.patch_size, 1))
@@ -305,10 +302,10 @@ class ConvolutionalModel:
             eval_predictions[offset:offset + opts.batch_size, :, :, :] = self._session.run(self._predictions, feed_dict)
 
         # remove padding
-        eval_predictions = eval_predictions[0:num_patches]
+        #eval_predictions = eval_predictions[0:num_patches]
         patches_per_image = int(num_patches / num_images)
 
-        # construct masks
+        # construct predicted images
         new_shape = (num_images, patches_per_image, opts.patch_size, opts.patch_size, 1)
         predictions = images.images_from_patches(eval_predictions.reshape(new_shape), imgs.shape, stride=opts.stride)
         predictions[predictions < 0] = 0
@@ -344,17 +341,20 @@ def main(_):
 
         if opts.num_epoch > 0:
             # train model
-            train_images = images.load_data(os.path.abspath(opts.data))#[20:50]
+            train_images = images.load_data(os.path.abspath(opts.data))
             model.train_images_shape = train_images.shape
 
-            big_patches = images.extract_patches(train_images, model.input_size, opts.stride)
-            margin = int((model.input_size - opts.patch_size) / 2)
-            labels_patches = big_patches[:, margin:opts.patch_size+margin, margin:opts.patch_size+margin]
+            labels_patches = images.extract_patches(train_images, model.input_size, opts.stride)
+            patches = images.downsample(labels_patches, opts.downsample_factor)
+            patches = tf.image.resize_images(
+                patches,
+                np.array([model.input_size, model.input_size]),
+                method=tf.image.ResizeMethod.BICUBIC,
+                align_corners=True
+            )
 
             # resize labels_patches to compensate for downsampling
             labels_patches = np.tile(labels_patches, (opts.downsample_factor, 1, 1, 1))
-
-
 
             print("Train on {} labels_patches of size {}x{}".format(
                 labels_patches.shape[0],
@@ -362,35 +362,27 @@ def main(_):
                 labels_patches.shape[2]
             ))
 
-            patches = images.downsample_patches(big_patches, opts.downsample_factor)
-            patches = tf.image.resize_images(
-                patches,
-                np.array([model.input_size, model.input_size]),
-                method=tf.image.ResizeMethod.BICUBIC)
-
-
             print("Train on {} patches of size {}x{}".format(
                 patches.shape[0],
                 patches.shape[1],
                 patches.shape[2]
             ))
 
-            downsampled_train_images = images.downsample_patches(train_images[120:121], opts.downsample_factor)[0:1]
-            downsampled_train_images = tf.image.resize_bicubic(
-                downsampled_train_images,
+            # Eval images
+            eval_images = np.swapaxes(train_images, 0, 1)[180:181]
+            downsampled_eval_images = images.downsample(eval_images, opts.downsample_factor, get_all_patches=False)
+            downsampled_eval_images = tf.image.resize_bicubic(
+                downsampled_eval_images,
                 np.array([model.train_images_shape[1], model.train_images_shape[2]]),
                 align_corners=True
             )
-            # resize train_images to compensate for downsampling
-            train_images = np.tile(train_images, (opts.downsample_factor, 1, 1, 1))
-
 
             for i in range(opts.num_epoch):
                 print("==== Train epoch: {} ====".format(i))
                 # Reset scores
                 tf.local_variables_initializer().run()
                 # Process one epoch
-                model.train(tf.Tensor.eval(patches), labels_patches, train_images[120:121], downsampled_train_images.eval())
+                model.train(tf.Tensor.eval(patches), labels_patches, eval_images, downsampled_eval_images.eval())
                 memop = tf.contrib.memory_stats.MaxBytesInUse()
                 print("Memory in use {:.2f} GB".format(memop.eval()/10**9))
                 # TODO: Save model to disk

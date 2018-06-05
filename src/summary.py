@@ -57,18 +57,18 @@ class Summary:
         opts = self._options
         num_eval_images = 2
         self._groundtruth = tf.placeholder(tf.float32, name="groundtruth")
-        self._image_summary = [
-            tf.summary.image('Groundtruth', self._groundtruth, max_outputs=num_eval_images)]
-
         self._downsampled = tf.placeholder(tf.float32, name="downsampled")
-        self._image_summary.append(
-            tf.summary.image('Downsampled', self._downsampled, max_outputs=num_eval_images))
-
         self._predictions = tf.placeholder(tf.float32, name="prediction")
-        self._image_summary.append(
-            tf.summary.image('Prediction', self._predictions, max_outputs=num_eval_images))
+        self._snr_improvement = tf.placeholder(tf.float32, name="snr_improvement")
 
-        self._image_summary = tf.summary.merge(self._image_summary)
+        self._eval_summary = [
+            tf.summary.image('Groundtruth', self._groundtruth, max_outputs=num_eval_images),
+            tf.summary.image('Downsampled', self._downsampled, max_outputs=num_eval_images),
+            tf.summary.image('Prediction', self._predictions, max_outputs=num_eval_images),
+            tf.summary.scalar('SNR Improvement', self._snr_improvement)
+        ]
+
+        self._eval_summary = tf.summary.merge(self._eval_summary)
 
 
     def initialize_snr_summary(self):
@@ -99,13 +99,19 @@ class Summary:
     def add_to_eval_summary(self, groundtruth, downsampled, predictions, global_step):
         opts = self._options
 
+        snr_bicubic = images.psnr(groundtruth, downsampled)
+        snr_prediction = images.psnr(groundtruth, predictions)
+        print("SNR Bicubic: {}, SNR Prediction: {}".format(snr_bicubic, snr_prediction))
+        snr_improvement = snr_prediction - snr_bicubic
+
         feed_dict_eval = {
             self._groundtruth: groundtruth,
             self._downsampled: downsampled,
-            self._predictions: predictions
+            self._predictions: predictions,
+            self._snr_improvement: snr_improvement
         }
 
-        image_sum, step = self._session.run([self._image_summary, global_step],
+        image_sum, step = self._session.run([self._eval_summary, global_step],
                                             feed_dict=feed_dict_eval)
         self._summary_writer.add_summary(image_sum, global_step=step)
 
