@@ -9,7 +9,7 @@ Used for binary image segmentation.
 """
 
 
-def forward(X, num_layers, root_size, dropout_keep=None):
+def forward(X, num_layers, root_size, dropout_keep=None, dilation_size=None):
     """Build the U-Net static computation graph
 
     :param X: input of network, use `input_size_needed` to find which image size it expect
@@ -25,7 +25,7 @@ def forward(X, num_layers, root_size, dropout_keep=None):
 
     # Contracting path
     conv_filter_size = (3, 3)
-    conv_filter_size_2 = (7, 7)
+    conv_filter_size_2 = (dilation_size, dilation_size)
     for layer_i in range(num_layers):
         if dropout_keep is not None:
             net = tf.nn.dropout(net, dropout_keep)
@@ -33,12 +33,13 @@ def forward(X, num_layers, root_size, dropout_keep=None):
         with tf.variable_scope("conv_{}".format(layer_i)):
             net = tf.layers.conv2d(net, num_filters, conv_filter_size, padding='same', name="conv1")
             net = tf.nn.relu(net, name="relu1")
-            net = tf.layers.conv2d(net, num_filters, conv_filter_size_2, dilation_rate=(2, 2), padding='same', name="conv2")
-            net = tf.nn.relu(net, name="relu2")
-            tf.Print(net, [net])
+            if dilation_size is not None:
+                net = tf.layers.conv2d(net, num_filters, conv_filter_size_2, dilation_rate=(2, 2), padding='same', name="conv2")
+                net = tf.nn.relu(net, name="relu2")
 
         conv.append(net)
 
+        # Skip last max pooling layer as the last layer is followed by an upsampling
         if layer_i < num_layers - 1:
             net = tf.layers.max_pooling2d(net, (2, 2), strides=(2, 2), name="pool")
 
@@ -66,8 +67,9 @@ def forward(X, num_layers, root_size, dropout_keep=None):
         with tf.variable_scope("conv_{}".format(num_layers + layer_i)):
             net = tf.layers.conv2d(net, num_filters, conv_filter_size, padding='same', name="conv1")
             net = tf.nn.relu(net, name="relu1")
-            net = tf.layers.conv2d(net, num_filters, conv_filter_size_2, dilation_rate=(2, 2), padding='same', name="conv2")
-            net = tf.nn.relu(net, name="relu2")
+            if dilation_size is not None:
+                net = tf.layers.conv2d(net, num_filters, conv_filter_size_2, dilation_rate=(2, 2), padding='same', name="conv2")
+                net = tf.nn.relu(net, name="relu2")
 
     assert len(conv) == 0
 

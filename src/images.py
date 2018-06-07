@@ -4,7 +4,12 @@ import PIL
 from PIL import Image
 
 def load_data(path, channels=1):
-    """
+    """ Load the input data into a python array
+
+    path: path to input data
+    channels: number of channels in input data
+
+    returns: images [num_images, width, height, channels] as np.float32
     """
     img = Image.open(path)
 
@@ -16,9 +21,9 @@ def load_data(path, channels=1):
         for i in range(n_frames):
             img.seek(i)
             # save images in numpy array as float64
-            images[i,:,:,:] = img_uint8_to_float(img)[:,:,np.newaxis]
+            images[i,:,:,:] = np.array(img)[:,:,np.newaxis]
 
-        return images
+        return img_uint8_to_float(images)
     else:
         print("Image Format not supported")
         return None
@@ -33,8 +38,8 @@ def extract_patches(images, patch_size, stride=4, channels=1):
     """
 
     z, x, y, _ = images.shape
-    x_starts = range(0, x - patch_size, stride)
-    y_starts = range(0, y - patch_size, stride)
+    x_starts = range(0, x - patch_size + stride, stride)
+    y_starts = range(0, y - patch_size + stride, stride)
     num_patches = len(x_starts)*len(y_starts)*z
 
     patches = np.zeros((num_patches, patch_size, patch_size, channels), dtype=np.float32)
@@ -85,33 +90,28 @@ def img_uint8_to_float(img):
 def images_from_patches(patches, image_shape, stride=None):
     """Generate image from patches
     """
-    num_images, num_patches, patch_size, _, num_channel = patches.shape
+    num_patches, patch_size, _, num_channel = patches.shape
 
     if stride is None:
         stride = patch_size
 
-    num_x_patches = len(range(0, image_shape[1] - patch_size, stride))
-    num_y_patches = len(range(0, image_shape[2] - patch_size, stride))
+    x_starts = range(0, image_shape[1] - patch_size + stride, stride)
+    y_starts = range(0, image_shape[2] - patch_size + stride, stride)
     patches_per_image = int(num_patches / image_shape[0])
 
-    #prediction_shape = (num_images, int(image_shape[1] / stride) * stride, int(image_shape[2] / stride) * stride, num_channel)
-    prediction_shape = image_shape
-    images = np.zeros(shape=prediction_shape, dtype=patches.dtype)
-    count_hits = np.zeros(shape=prediction_shape, dtype=np.uint64)
+    images = np.zeros(shape=image_shape, dtype=patches.dtype)
+    count_hits = np.zeros(shape=image_shape, dtype=np.uint64)
 
     for n in range(0, image_shape[0]):
-        patch_idx = 0
-        for x in range(0, num_x_patches):
-            for y in range(0, num_y_patches):
-                x_pos = x * stride
-                y_pos = y * stride
-                images[n, x_pos:x_pos+patch_size, y_pos:y_pos+patch_size] += patches[n, patch_idx]
-                count_hits[n, x_pos:x_pos+patch_size, y_pos:y_pos+patch_size] += 1
-                patch_idx += 1
+        i = 0
+        for ix in x_starts:
+            for iy in y_starts:
+                images[n, ix:ix + patch_size, iy:iy + patch_size] += patches[n*patches_per_image+i]
+                count_hits[n, ix:ix + patch_size, iy:iy + patch_size] += 1
+                i += 1
 
     # replace zero counts with 1 to avoid division by 0
     count_hits[count_hits == 0] = 1
-    print("Count hits: ", count_hits)
     images = images / count_hits
 
     return images

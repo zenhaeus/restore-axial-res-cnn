@@ -104,6 +104,10 @@ class Summary:
         print("SNR Bicubic: {}, SNR Prediction: {}".format(snr_bicubic, snr_prediction))
         snr_improvement = snr_prediction - snr_bicubic
 
+        # Clip downsampled version for display
+        downsampled[downsampled < 0] = 0
+        downsampled[downsampled > 1] = 1
+
         feed_dict_eval = {
             self._groundtruth: groundtruth,
             self._downsampled: downsampled,

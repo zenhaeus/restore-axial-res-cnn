@@ -19,16 +19,20 @@ logging.getLogger('tensorflow').disabled = True
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
 tf.logging.set_verbosity(tf.logging.WARN)
 
+# TODO: implement full volume prediction
+tf.app.flags.DEFINE_boolean('full_prediction', False, "Whether or not to run a full volume prediction after training")
+
 tf.app.flags.DEFINE_integer('gpu', 0, "GPU to run the model on")
-tf.app.flags.DEFINE_integer('batch_size', 5, "Batch size of training instances")
-tf.app.flags.DEFINE_integer('patch_size', 108, "Size of the prediction image")
+tf.app.flags.DEFINE_integer('batch_size', 20, "Batch size of training instances")
+tf.app.flags.DEFINE_integer('patch_size', 120, "Size of the prediction image")
 tf.app.flags.DEFINE_integer('stride', 60, "Sliding delta for patches")
 tf.app.flags.DEFINE_integer('seed', 2018, "Random seed for reproducibility")
 tf.app.flags.DEFINE_integer('root_size', 16, "Number of filters of the first U-Net layer")
-tf.app.flags.DEFINE_integer('num_epoch', 20, "Number of pass on the dataset during training")
+tf.app.flags.DEFINE_integer('num_epoch', 40, "Number of pass on the dataset during training")
 tf.app.flags.DEFINE_integer('num_layers', 3, "Number of layers of the U-Net")
 tf.app.flags.DEFINE_integer('train_score_every', 1000, "Compute training score after the given number of iterations")
-tf.app.flags.DEFINE_integer('downsample_factor', 3, "Determines the factor by which training images are downsampled for training")
+tf.app.flags.DEFINE_integer('k_factor', 3, "Determines the factor by which training images are downsampled for training")
+tf.app.flags.DEFINE_integer('dilation_size', 3, "Filter size of dilation layer")
 
 tf.app.flags.DEFINE_float('learning_rate', 0.001, "Initial learning rate")
 tf.app.flags.DEFINE_float('momentum', 0.9, "Momentum")
@@ -57,11 +61,12 @@ class Options(object):
         self.seed = FLAGS.seed
         self.stride = FLAGS.stride
         self.dropout = FLAGS.dropout
+        self.dilation_size = FLAGS.dilation_size
         self.root_size = FLAGS.root_size
         self.num_epoch = FLAGS.num_epoch
         self.num_layers = FLAGS.num_layers
         self.train_score_every = FLAGS.train_score_every
-        self.downsample_factor = FLAGS.downsample_factor
+        self.downsample_factor = FLAGS.k_factor
         self.data = FLAGS.data
         self.log_suffix = FLAGS.log_suffix
 
@@ -180,7 +185,8 @@ class ConvolutionalModel:
             patches_node,
             root_size=opts.root_size,
             num_layers=opts.num_layers,
-            dropout_keep=dropout_keep
+            dropout_keep=dropout_keep,
+            dilation_size=opts.dilation_size
         )
 
         #predictions = tf.nn.softmax(predict_logits)
@@ -221,8 +227,9 @@ class ConvolutionalModel:
         opts = self._options
 
         # Fix negative values from downsampling
-        downsampled_eval_images[downsampled_eval_images < 0] = 0
-        patches[patches < 0] = 0
+        # TODO: check if this changes network performance
+        # downsampled_eval_images[downsampled_eval_images < 0] = 0
+        # patches[patches < 0] = 0
 
         num_train_patches = patches.shape[0]
 
@@ -254,10 +261,9 @@ class ConvolutionalModel:
             self._summary.add_to_snr_summary(snr, self._global_step)
 
             # Do evaluation once per epoch
-            if step > 0 and step % int(patches.shape[0] / opts.batch_size) == 1:
+            if step > 0 and step % int(patches.shape[0] / opts.batch_size) == 0:
                 predictions = self.predict(downsampled_eval_images)
 
-                # TODO: add prediction quality measures to summary
                 self._summary.add_to_eval_summary(
                     eval_images,
                     downsampled_eval_images,
@@ -271,27 +277,39 @@ class ConvolutionalModel:
         """Run inference on `imgs` and return predictions
 
         imgs: [num_images, image_height, image_width, num_channel]
-        returns: masks [num_images, images_height, image_width] with road probabilities
+        returns: predictions [num_images, images_height, image_width, num_channel]
         """
         opts = self._options
 
         num_images = imgs.shape[0]
 
         print()
-        print("Running prediction on {} images... ".format(num_images))
+        print("Running prediction on {} images with shape {}... ".format(num_images, imgs.shape))
 
-        patches = images.extract_patches(imgs, self.input_size, opts.stride)
+        #patches = images.extract_patches(imgs, self.input_size, opts.stride)
+        patches = tf.extract_image_patches(
+            imgs,
+            [1, self.input_size, self.input_size, 1],
+            [1, opts.stride, opts.stride, 1],
+            [1, 1, 1, 1],
+            'VALID'
+        ).eval()
+        patches = patches.reshape((-1, self.input_size, self.input_size, 1))
 
         num_patches = patches.shape[0]
 
         # patches padding to have full batches
-        #if num_patches % opts.batch_size != 0:
-        #    num_extra_patches = opts.batch_size - (num_patches % opts.batch_size)
-        #    extra_patches = np.zeros((num_extra_patches, self.input_size, self.input_size, 1))
-        #    patches = np.concatenate([patches, extra_patches], axis=0)
+        if num_patches % opts.batch_size != 0:
+            num_extra_patches = opts.batch_size - (num_patches % opts.batch_size)
+            extra_patches = np.zeros((num_extra_patches, self.input_size, self.input_size, 1))
+            patches = np.concatenate([patches, extra_patches], axis=0)
+
+        num_patches = patches.shape[0]
 
         num_batches = int(num_patches / opts.batch_size)
         eval_predictions = np.ndarray(shape=(num_patches, opts.patch_size, opts.patch_size, 1))
+        print("Patches to predict: ", num_patches)
+        print("Shape eval predictions: ", eval_predictions.shape)
 
         for batch in range(num_batches):
             offset = batch * opts.batch_size
@@ -302,13 +320,15 @@ class ConvolutionalModel:
             eval_predictions[offset:offset + opts.batch_size, :, :, :] = self._session.run(self._predictions, feed_dict)
 
         # remove padding
-        #eval_predictions = eval_predictions[0:num_patches]
-        patches_per_image = int(num_patches / num_images)
+        eval_predictions = eval_predictions[0:num_patches]
+
 
         # construct predicted images
-        new_shape = (num_images, patches_per_image, opts.patch_size, opts.patch_size, 1)
-        predictions = images.images_from_patches(eval_predictions.reshape(new_shape), imgs.shape, stride=opts.stride)
+        predictions = images.images_from_patches(eval_predictions, imgs.shape, stride=opts.stride)
+
+        # Clipping for display in tensorboard
         predictions[predictions < 0] = 0
+        predictions[predictions > 1] = 1
 
         return predictions
 
@@ -344,7 +364,17 @@ def main(_):
             train_images = images.load_data(os.path.abspath(opts.data))
             model.train_images_shape = train_images.shape
 
-            labels_patches = images.extract_patches(train_images, model.input_size, opts.stride)
+            #labels_patches = images.extract_patches(train_images, model.input_size, opts.stride)
+            labels_patches = tf.extract_image_patches(
+                train_images,
+                [1, model.input_size, model.input_size, 1],
+                [1, opts.stride, opts.stride, 1],
+                [1, 1, 1, 1],
+                'VALID'
+            ).eval()
+            labels_patches = labels_patches.reshape((-1, model.input_size, model.input_size, 1))
+            print("Shape labels_patches: ", labels_patches.shape)
+
             patches = images.downsample(labels_patches, opts.downsample_factor)
             patches = tf.image.resize_images(
                 patches,
