@@ -1,4 +1,5 @@
 import tensorflow as tf
+import numpy as np
 
 import images
 
@@ -99,9 +100,22 @@ class Summary:
     def add_to_eval_summary(self, groundtruth, downsampled, predictions, global_step):
         opts = self._options
 
-        snr_bicubic = images.psnr(groundtruth, downsampled)
-        snr_prediction = images.psnr(groundtruth, predictions)
+        snr_bicubic = 0.0
+        snr_prediction = 0.0
+        if groundtruth.shape == predictions.shape:
+            snr_bicubic = images.psnr(groundtruth, downsampled)
+            snr_prediction = images.psnr(groundtruth, predictions)
         print("SNR Bicubic: {}, SNR Prediction: {}".format(snr_bicubic, snr_prediction))
+
+        print("Mean groundtruth:", np.mean(groundtruth))
+        print("Mean downsampled:", np.mean(downsampled))
+        print("Mean predictions:", np.mean(predictions))
+        print("Max groundtruth:", np.max(groundtruth))
+        print("Max downsampled:", np.max(downsampled))
+        print("Max predictions:", np.max(predictions))
+        print("Min groundtruth:", np.min(groundtruth))
+        print("Min downsampled:", np.min(downsampled))
+        print("Min predictions:", np.min(predictions))
         snr_improvement = snr_prediction - snr_bicubic
 
         # Clip downsampled version for display

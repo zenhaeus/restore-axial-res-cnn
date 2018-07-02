@@ -28,6 +28,14 @@ def load_data(path, channels=1):
         print("Image Format not supported")
         return None
 
+def save_array_as_tif(array, path):
+    array = img_float_to_uint8(array)
+    images = []
+    for layer in np.squeeze(array):
+        images.append(Image.fromarray(layer))
+
+    images[0].save(path, compression="tiff_deflate", save_all=True, append_images=images[1:])
+
 
 def extract_patches(images, patch_size, stride=4, channels=1):
     """Generate patches from an array of images
@@ -119,10 +127,10 @@ def images_from_patches(patches, image_shape, stride=None):
 def psnr(original, degraded):
     """ Compute the peak signal-to-noise ratio
     """
-    assert original.shape == degraded.shape, "Shapes of original and degraded must be identical to calculate PSNR"
+    assert original.shape == degraded.shape, "Shapes of original ({}) and degraded ({}) must be identical to calculate PSNR".format(original.shape, degraded.shape)
 
 
-    numerator = np.sum(np.square(original))
-    denominator = np.sum(np.square(original - degraded))
+    numerator = np.amax(original)
+    denominator = ((original - degraded) ** 2).mean()
 
-    return 10 * np.log10(numerator / denominator)
+    return 20 * (np.log10(numerator) - np.log10(np.sqrt(denominator)))

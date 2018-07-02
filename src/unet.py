@@ -9,13 +9,15 @@ Used for binary image segmentation.
 """
 
 
-def forward(X, num_layers, root_size, dropout_keep=None, dilation_size=None):
+def forward(X, num_layers, root_size, dropout_keep=None, dilation_size=3, conv_size=3):
     """Build the U-Net static computation graph
 
     :param X: input of network, use `input_size_needed` to find which image size it expect
     :param num_layers: number of layers down
     :param root_size: number of filters of the first layer, will be doubled every down move
     :param dropout_keep: tf variable keep_proba to enable dropout or not
+    :param dilation_size: dilated convolution filter size
+    :param conv_size: convolution filter size
     :return: the network
     """
     net = X - 0.5
@@ -24,7 +26,7 @@ def forward(X, num_layers, root_size, dropout_keep=None, dilation_size=None):
     conv = []
 
     # Contracting path
-    conv_filter_size = (3, 3)
+    conv_filter_size = (conv_size, conv_size)
     conv_filter_size_2 = (dilation_size, dilation_size)
     for layer_i in range(num_layers):
         if dropout_keep is not None:
@@ -33,7 +35,7 @@ def forward(X, num_layers, root_size, dropout_keep=None, dilation_size=None):
         with tf.variable_scope("conv_{}".format(layer_i)):
             net = tf.layers.conv2d(net, num_filters, conv_filter_size, padding='same', name="conv1")
             net = tf.nn.relu(net, name="relu1")
-            if dilation_size is not None:
+            if dilation_size > 0:
                 net = tf.layers.conv2d(net, num_filters, conv_filter_size_2, dilation_rate=(2, 2), padding='same', name="conv2")
                 net = tf.nn.relu(net, name="relu2")
 
@@ -67,7 +69,7 @@ def forward(X, num_layers, root_size, dropout_keep=None, dilation_size=None):
         with tf.variable_scope("conv_{}".format(num_layers + layer_i)):
             net = tf.layers.conv2d(net, num_filters, conv_filter_size, padding='same', name="conv1")
             net = tf.nn.relu(net, name="relu1")
-            if dilation_size is not None:
+            if dilation_size > 0:
                 net = tf.layers.conv2d(net, num_filters, conv_filter_size_2, dilation_rate=(2, 2), padding='same', name="conv2")
                 net = tf.nn.relu(net, name="relu2")
 
@@ -77,13 +79,3 @@ def forward(X, num_layers, root_size, dropout_keep=None, dilation_size=None):
     net = tf.layers.conv2d(net, 1, (1, 1), padding='same', name="weight_output")
 
     return net
-
-
-def input_size_needed(output_size, num_layers):
-    """Utility function to compute image size for a given U-Net output
-
-    output_size: width/height of the output image
-    num_layer: number of layers
-    """
-    # TODO: change from fixed value, need to keep track of cnn structure
-    return 108

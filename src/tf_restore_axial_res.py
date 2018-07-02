@@ -19,30 +19,48 @@ logging.getLogger('tensorflow').disabled = True
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
 tf.logging.set_verbosity(tf.logging.WARN)
 
+# 
+DEFAULT_FULL_PREDICTION = False
+DEFAULT_GPU =  0
+DEFAULT_BATCH_SIZE = 30
+DEFAULT_PATCH_SIZE = 120
+DEFAULT_STRIDE = 60
+DEFAULT_SEED = 2018
+DEFAULT_ROOT_SIZE = 16
+DEFAULT_NUM_EPOCH = 40
+DEFAULT_NUM_LAYERS = 3
+DEFAULT_K_FACTOR = 3
+DEFAULT_DILATION_SIZE = 3
+DEFAULT_CONV_SIZE = 3
+DEFAULT_LEARNING_RATE = 0.001
+DEFAULT_DROPOUT = 0.9
+DEFAULT_LOGDIR = os.path.abspath("./logdir")
+DEFAULT_SAVE_PATH = os.path.abspath("./runs")
+DEFAULT_DATA = os.path.abspath("../data/Membrane_.tif")
+DEFAULT_LOG_SUFFIX = ""
+
 # TODO: implement full volume prediction
-tf.app.flags.DEFINE_boolean('full_prediction', False, "Whether or not to run a full volume prediction after training")
+tf.app.flags.DEFINE_boolean('full_prediction', DEFAULT_FULL_PREDICTION, "Whether or not to run a full volume prediction after training")
 
-tf.app.flags.DEFINE_integer('gpu', 0, "GPU to run the model on")
-tf.app.flags.DEFINE_integer('batch_size', 20, "Batch size of training instances")
-tf.app.flags.DEFINE_integer('patch_size', 120, "Size of the prediction image")
-tf.app.flags.DEFINE_integer('stride', 60, "Sliding delta for patches")
-tf.app.flags.DEFINE_integer('seed', 2018, "Random seed for reproducibility")
-tf.app.flags.DEFINE_integer('root_size', 16, "Number of filters of the first U-Net layer")
-tf.app.flags.DEFINE_integer('num_epoch', 40, "Number of pass on the dataset during training")
-tf.app.flags.DEFINE_integer('num_layers', 3, "Number of layers of the U-Net")
-tf.app.flags.DEFINE_integer('train_score_every', 1000, "Compute training score after the given number of iterations")
-tf.app.flags.DEFINE_integer('k_factor', 3, "Determines the factor by which training images are downsampled for training")
-tf.app.flags.DEFINE_integer('dilation_size', 3, "Filter size of dilation layer")
+tf.app.flags.DEFINE_integer('gpu', DEFAULT_GPU, "GPU to run the model on")
+tf.app.flags.DEFINE_integer('batch_size', DEFAULT_BATCH_SIZE, "Batch size of training instances")
+tf.app.flags.DEFINE_integer('patch_size', DEFAULT_PATCH_SIZE, "Size of the prediction image")
+tf.app.flags.DEFINE_integer('stride', DEFAULT_STRIDE, "Sliding delta for patches")
+tf.app.flags.DEFINE_integer('seed', DEFAULT_SEED, "Random seed for reproducibility")
+tf.app.flags.DEFINE_integer('root_size', DEFAULT_ROOT_SIZE, "Number of filters of the first U-Net layer")
+tf.app.flags.DEFINE_integer('num_epoch', DEFAULT_NUM_EPOCH, "Number of pass on the dataset during training")
+tf.app.flags.DEFINE_integer('num_layers', DEFAULT_NUM_LAYERS, "Number of layers of the U-Net")
+tf.app.flags.DEFINE_integer('k_factor', DEFAULT_K_FACTOR, "Determines the factor by which training images are downsampled for training")
+tf.app.flags.DEFINE_integer('dilation_size', DEFAULT_DILATION_SIZE, "Filter size of dilated convolution layer")
+tf.app.flags.DEFINE_integer('conv_size', DEFAULT_CONV_SIZE, "Filter size of convolution layer")
 
-tf.app.flags.DEFINE_float('learning_rate', 0.001, "Initial learning rate")
-tf.app.flags.DEFINE_float('momentum', 0.9, "Momentum")
-tf.app.flags.DEFINE_float('dropout', 0.9, "Probability to keep an input")
+tf.app.flags.DEFINE_float('learning_rate', DEFAULT_LEARNING_RATE, "Initial learning rate")
+tf.app.flags.DEFINE_float('dropout', DEFAULT_DROPOUT, "Probability to keep an input")
 
-tf.app.flags.DEFINE_string('logdir', os.path.abspath("./logdir"), "Directory where to write logfiles")
-tf.app.flags.DEFINE_string('save_path', os.path.abspath("./runs"),
-                           "Directory where to write checkpoints, overlays and submissions")
-tf.app.flags.DEFINE_string('data', os.path.abspath("../data/Membrane_.tif"), "Data to learn on")
-tf.app.flags.DEFINE_string('log_suffix', os.path.abspath(""), "suffix to attach to log folder")
+tf.app.flags.DEFINE_string('logdir', DEFAULT_LOGDIR, "Directory where to write logfiles")
+tf.app.flags.DEFINE_string('save_path', DEFAULT_SAVE_PATH, "Directory where to write checkpoints")
+tf.app.flags.DEFINE_string('data', DEFAULT_DATA, "Data to learn on")
+tf.app.flags.DEFINE_string('log_suffix', DEFAULT_LOG_SUFFIX, "suffix to attach to log folder")
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -51,24 +69,47 @@ class Options(object):
         Options used by model
     """
     def __init__(self):
+        self.full_prediction = FLAGS.full_prediction
         self.batch_size = FLAGS.batch_size
         self.gpu = FLAGS.gpu
         self.learning_rate = FLAGS.learning_rate
         self.logdir = FLAGS.logdir
-        self.momentum = FLAGS.momentum
         self.patch_size = FLAGS.patch_size
         self.save_path = FLAGS.save_path
         self.seed = FLAGS.seed
         self.stride = FLAGS.stride
         self.dropout = FLAGS.dropout
         self.dilation_size = FLAGS.dilation_size
+        self.conv_size = FLAGS.conv_size
         self.root_size = FLAGS.root_size
         self.num_epoch = FLAGS.num_epoch
         self.num_layers = FLAGS.num_layers
-        self.train_score_every = FLAGS.train_score_every
         self.downsample_factor = FLAGS.k_factor
         self.data = FLAGS.data
         self.log_suffix = FLAGS.log_suffix
+
+        if FLAGS.learning_rate != DEFAULT_LEARNING_RATE:
+            self.log_suffix += "-lr_" + str(FLAGS.learning_rate)
+        if FLAGS.patch_size != DEFAULT_PATCH_SIZE:
+            self.log_suffix += "-ps_" + str(FLAGS.patch_size)
+        if FLAGS.seed != DEFAULT_SEED:
+            self.log_suffix += "-se_" + str(FLAGS.seed)
+        if FLAGS.stride != DEFAULT_STRIDE:
+            self.log_suffix += "-st_" + str(FLAGS.stride)
+        if FLAGS.dropout != DEFAULT_DROPOUT:
+            self.log_suffix += "-dr_" + str(FLAGS.dropout)
+        if FLAGS.dilation_size != DEFAULT_DILATION_SIZE:
+            self.log_suffix += "-di_" + str(FLAGS.dilation_size)
+        if FLAGS.conv_size != DEFAULT_CONV_SIZE:
+            self.log_suffix += "-co_" + str(FLAGS.conv_size)
+        if FLAGS.root_size != DEFAULT_ROOT_SIZE:
+            self.log_suffix += "-ro_" + str(FLAGS.root_size)
+        if FLAGS.num_epoch != DEFAULT_NUM_EPOCH:
+            self.log_suffix += "-ep_" + str(FLAGS.num_epoch)
+        if FLAGS.num_layers != DEFAULT_NUM_LAYERS:
+            self.log_suffix += "-la_" + str(FLAGS.num_layers)
+        if FLAGS.k_factor != DEFAULT_K_FACTOR:
+            self.log_suffix += "-k_" + str(FLAGS.k_factor)
 
 class ConvolutionalModel:
     def __init__(self, options, session):
@@ -81,44 +122,57 @@ class ConvolutionalModel:
         tf.set_random_seed(options.seed)
         self.input_size = self._options.patch_size
 
-        self.experiment_name = datetime.now().strftime("%Y-%m-%dT%Hh%Mm%Ss")
+        self.experiment_name = datetime.now().strftime("%Y%m%d%H%M%S")
         experiment_path = os.path.abspath(os.path.join(options.save_path, self.experiment_name))
         self.summary_path = os.path.join(options.logdir, self.experiment_name + options.log_suffix)
 
         self._summary = Summary(options, session)
         self.build_graph()
 
-    def calculate_loss_abs(self, labels, pred_logits):
+    def calculate_loss_abs(self, labels, prediction):
         """Calculate absolute difference loss
 
         """
         loss = tf.losses.absolute_difference(
             labels,
-            pred_logits
+            prediction
         )
 
         return loss
 
-    def calculate_loss_mse(self, labels, pred_logits):
+    def calculate_loss_mse(self, labels, prediction):
         """Calculate mean squared error loss
 
         """
         loss = tf.losses.mean_squared_error(
             labels,
-            pred_logits
+            prediction
         )
 
         return loss
 
-    def calculate_loss_snr(self, labels, pred_logits):
+    def calculate_loss_snr(self, labels, prediction):
         """Calculate loss based on signal to noise
         """
         loss = tf.negative(
-            tf.log(tf.divide(
-                tf.reduce_sum(tf.square(labels)),
-                tf.reduce_sum(tf.square(labels - pred_logits)))),
-            name="snr")
+            tf.multiply(
+                tf.constant(20.0),
+                tf.subtract(
+                    self.tf_log_10(self.tf_range(labels)),
+                    self.tf_log_10(tf.sqrt(tf.losses.mean_squared_error(labels, prediction)))
+                )
+            ),
+            name="snr"
+        )
+        print(loss)
+
         return loss
+
+    def tf_log_10(self, x):
+        return tf.divide(tf.log(x), tf.log(tf.constant(10.0)))
+
+    def tf_range(self, img):
+        return tf.subtract(tf.reduce_max(img), tf.reduce_min(img))
 
     def optimize(self, loss):
         """optimize with MomentumOptimizer
@@ -132,7 +186,7 @@ class ConvolutionalModel:
             staircase=True
         )
 
-        optimizer = tf.train.MomentumOptimizer(learning_rate, self._options.momentum)
+        optimizer = tf.train.MomentumOptimizer(learning_rate, 0.9)
         train = optimizer.minimize(loss, global_step=self._global_step)
 
         return train, learning_rate
@@ -186,7 +240,8 @@ class ConvolutionalModel:
             root_size=opts.root_size,
             num_layers=opts.num_layers,
             dropout_keep=dropout_keep,
-            dilation_size=opts.dilation_size
+            dilation_size=opts.dilation_size,
+            conv_size=opts.conv_size
         )
 
         #predictions = tf.nn.softmax(predict_logits)
@@ -359,10 +414,32 @@ def main(_):
         with tf.device(device):
             model = ConvolutionalModel(opts, session)
 
+            # Load training data
+            train_images = images.load_data(os.path.abspath(opts.data))#[6:66, 28:748, 16:556, :]
+            model.train_images_shape = train_images.shape
+
+            # Eval images
+            eval_images = np.swapaxes(train_images, 0, 1)
+            downsampled_eval_images = images.downsample(eval_images, opts.downsample_factor, get_all_patches=False)
+            downsampled_eval_images = tf.image.resize_bicubic(
+                downsampled_eval_images,
+                np.array([model.train_images_shape[1], model.train_images_shape[2]]),
+                align_corners=True
+            )
+            downsampled_eval_images = downsampled_eval_images.eval()
+
+            #print("train_images shape: ", train_images.shape)
+            #eval_images = np.swapaxes(train_images, 0, 1)[395:396]
+            #print("eval_images shape: ", eval_images.shape)
+
+            #downsampled_eval_images = tf.image.resize_bicubic(
+            #    downsampled_eval_images,
+            #    np.array([downsampled_eval_images.shape[1]*opts.downsample_factor, model.train_images_shape[2]]),
+            #    align_corners=True
+            #)
+
         if opts.num_epoch > 0:
             # train model
-            train_images = images.load_data(os.path.abspath(opts.data))
-            model.train_images_shape = train_images.shape
 
             #labels_patches = images.extract_patches(train_images, model.input_size, opts.stride)
             labels_patches = tf.extract_image_patches(
@@ -398,25 +475,34 @@ def main(_):
                 patches.shape[2]
             ))
 
-            # Eval images
-            eval_images = np.swapaxes(train_images, 0, 1)[180:181]
-            downsampled_eval_images = images.downsample(eval_images, opts.downsample_factor, get_all_patches=False)
-            downsampled_eval_images = tf.image.resize_bicubic(
-                downsampled_eval_images,
-                np.array([model.train_images_shape[1], model.train_images_shape[2]]),
-                align_corners=True
-            )
+
 
             for i in range(opts.num_epoch):
                 print("==== Train epoch: {} ====".format(i))
                 # Reset scores
                 tf.local_variables_initializer().run()
                 # Process one epoch
-                model.train(tf.Tensor.eval(patches), labels_patches, eval_images, downsampled_eval_images.eval())
+                model.train(patches.eval(), labels_patches, eval_images[180:181], downsampled_eval_images[180:181])
                 memop = tf.contrib.memory_stats.MaxBytesInUse()
                 print("Memory in use {:.2f} GB".format(memop.eval()/10**9))
                 # TODO: Save model to disk
                 # model.save(i)
+            print("Training finished")
+
+        if opts.full_prediction:
+
+            # Clip downsampled version for display
+            downsampled_eval_images[downsampled_eval_images < 0] = 0
+            downsampled_eval_images[downsampled_eval_images > 1] = 1
+
+            print("Generating full prediction on {}".format(opts.data))
+            full_pred = model.predict(np.swapaxes(downsampled_eval_images, 0, 1))
+            np.save(os.path.abspath(os.path.join(opts.save_path, "bicubic.npy")), downsampled_eval_images)
+            np.save(os.path.abspath(os.path.join(opts.save_path, "full_prediction.npy")), full_pred)
+            images.save_array_as_tif(downsampled_eval_images, os.path.abspath(os.path.join(opts.save_path, "bicubic.tif")))
+            images.save_array_as_tif(full_pred, os.path.abspath(os.path.join(opts.save_path, "full_prediction.tif")))
+            print("Predictions saved")
+
 
 if __name__ == '__main__':
     tf.app.run()
