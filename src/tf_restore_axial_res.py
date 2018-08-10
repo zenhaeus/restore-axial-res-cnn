@@ -22,7 +22,7 @@ tf.logging.set_verbosity(tf.logging.WARN)
 # 
 DEFAULT_FULL_PREDICTION = False
 DEFAULT_GPU =  0
-DEFAULT_BATCH_SIZE = 30
+DEFAULT_BATCH_SIZE = 10
 DEFAULT_PATCH_SIZE = 120
 DEFAULT_STRIDE = 60
 DEFAULT_SEED = 2018
@@ -33,13 +33,12 @@ DEFAULT_K_FACTOR = 3
 DEFAULT_DILATION_SIZE = 3
 DEFAULT_CONV_SIZE = 3
 DEFAULT_LEARNING_RATE = 0.001
-DEFAULT_DROPOUT = 0.9
+DEFAULT_DROPOUT = 0.99
 DEFAULT_LOGDIR = os.path.abspath("./logdir")
 DEFAULT_SAVE_PATH = os.path.abspath("./runs")
 DEFAULT_DATA = os.path.abspath("../data/Membrane_.tif")
 DEFAULT_LOG_SUFFIX = ""
 
-# TODO: implement full volume prediction
 tf.app.flags.DEFINE_boolean('full_prediction', DEFAULT_FULL_PREDICTION, "Whether or not to run a full volume prediction after training")
 
 tf.app.flags.DEFINE_integer('gpu', DEFAULT_GPU, "GPU to run the model on")
@@ -169,9 +168,13 @@ class ConvolutionalModel:
         return loss
 
     def tf_log_10(self, x):
+        """ log10 implemented using tensorflow
+        """
         return tf.divide(tf.log(x), tf.log(tf.constant(10.0)))
 
     def tf_range(self, img):
+        """ calculate dynamic range of an image using tensorflow
+        """
         return tf.subtract(tf.reduce_max(img), tf.reduce_min(img))
 
     def optimize(self, loss):
@@ -201,7 +204,7 @@ class ConvolutionalModel:
 
     def build_graph(self):
         """
-
+            Build the tensorflow graph for the model
         """
         opts = self._options
 
@@ -244,7 +247,6 @@ class ConvolutionalModel:
             conv_size=opts.conv_size
         )
 
-        #predictions = tf.nn.softmax(predict_logits)
         predictions = predict_logits
 
         print("Predicted logits: {}".format(predict_logits))
@@ -259,7 +261,6 @@ class ConvolutionalModel:
         self._predict_logits = predict_logits
 
         self._summary.create_writer(self.summary_path)
-        self._summary.initialize_train_summary()
         self._summary.initialize_snr_summary()
         self._summary.initialize_eval_summary()
 
@@ -276,19 +277,18 @@ class ConvolutionalModel:
         """Train the model for one epoch
 
         params:
-            patches: [num_patches, patch_height, patch_width]
-            imgs: [num_images, img_height, img_width]
+            patches: [num_patches, patch_height, patch_width, num_channel]
+            labels_patches: [num_patches, patch_height, patch_width, num_channel]
+            eval_images: [num_images, img_height, img_width, num_channel]
+            downsampled_eval_images: [num_images, img_height, img_width, num_channel]
         """
         opts = self._options
-
-        # Fix negative values from downsampling
-        # TODO: check if this changes network performance
-        # downsampled_eval_images[downsampled_eval_images < 0] = 0
-        # patches[patches < 0] = 0
 
         num_train_patches = patches.shape[0]
 
         indices = np.arange(0, num_train_patches)
+
+        # randomize indices for training
         np.random.shuffle(indices)
 
         for batch_i, offset in enumerate(range(0, num_train_patches - opts.batch_size, opts.batch_size)):
@@ -341,7 +341,6 @@ class ConvolutionalModel:
         print()
         print("Running prediction on {} images with shape {}... ".format(num_images, imgs.shape))
 
-        #patches = images.extract_patches(imgs, self.input_size, opts.stride)
         patches = tf.extract_image_patches(
             imgs,
             [1, self.input_size, self.input_size, 1],
@@ -366,6 +365,7 @@ class ConvolutionalModel:
         print("Patches to predict: ", num_patches)
         print("Shape eval predictions: ", eval_predictions.shape)
 
+        # do batchwise prediction
         for batch in range(num_batches):
             offset = batch * opts.batch_size
 
@@ -389,6 +389,9 @@ class ConvolutionalModel:
 
 
     def save(self, epoch=0):
+        """
+            Saves the training state of the model to disk to continue training at a later point
+        """
         opts = self._options
         model_data_dir = os.path.abspath(
             os.path.join(opts.save_path, self.experiment_name, 'model-epoch-{:03d}.chkpt'.format(epoch)))
@@ -399,7 +402,8 @@ class ConvolutionalModel:
 
 def main(_):
     """
-
+        main routine that initializes and launches the training process according
+        to the parameters supplied as flags when executing this file.
     """
     opts = Options()
 
@@ -412,10 +416,20 @@ def main(_):
         device = '/device:CPU:0' if opts.gpu == -1 else '/device:GPU:{}'.format(opts.gpu)
         print("Running on device {}".format(device))
         with tf.device(device):
+            # Initialize Model
             model = ConvolutionalModel(opts, session)
 
             # Load training data
-            train_images = images.load_data(os.path.abspath(opts.data))#[6:66, 28:748, 16:556, :]
+            train_images = images.load_data(os.path.abspath(opts.data))
+
+            # cut image to patch friendly size
+            size_x = int(train_images.shape[1] / opts.stride) * opts.stride
+            size_y = int(train_images.shape[2] / opts.stride) * opts.stride
+            start_x = int((train_images.shape[1]-size_x)/2)
+            start_y = int((train_images.shape[2]-size_y)/2)
+
+            train_images = train_images[:,start_x:start_x+size_x,start_y:start_y+size_y,:]
+
             model.train_images_shape = train_images.shape
 
             # Eval images
@@ -428,20 +442,10 @@ def main(_):
             )
             downsampled_eval_images = downsampled_eval_images.eval()
 
-            #print("train_images shape: ", train_images.shape)
-            #eval_images = np.swapaxes(train_images, 0, 1)[395:396]
-            #print("eval_images shape: ", eval_images.shape)
-
-            #downsampled_eval_images = tf.image.resize_bicubic(
-            #    downsampled_eval_images,
-            #    np.array([downsampled_eval_images.shape[1]*opts.downsample_factor, model.train_images_shape[2]]),
-            #    align_corners=True
-            #)
-
+        # Start training
         if opts.num_epoch > 0:
             # train model
 
-            #labels_patches = images.extract_patches(train_images, model.input_size, opts.stride)
             labels_patches = tf.extract_image_patches(
                 train_images,
                 [1, model.input_size, model.input_size, 1],
@@ -452,6 +456,7 @@ def main(_):
             labels_patches = labels_patches.reshape((-1, model.input_size, model.input_size, 1))
             print("Shape labels_patches: ", labels_patches.shape)
 
+            # downsample patches and resize them back to original dimensions
             patches = images.downsample(labels_patches, opts.downsample_factor)
             patches = tf.image.resize_images(
                 patches,
@@ -482,23 +487,28 @@ def main(_):
                 # Reset scores
                 tf.local_variables_initializer().run()
                 # Process one epoch
-                model.train(patches.eval(), labels_patches, eval_images[180:181], downsampled_eval_images[180:181])
+                eval_ids = int(eval_images.shape[0] / 2)
+                print("Eval on image: {}".format(eval_ids))
+                model.train(patches.eval(), labels_patches, eval_images[eval_ids:eval_ids+1], downsampled_eval_images[eval_ids:eval_ids+1])
                 memop = tf.contrib.memory_stats.MaxBytesInUse()
                 print("Memory in use {:.2f} GB".format(memop.eval()/10**9))
-                # TODO: Save model to disk
-                # model.save(i)
             print("Training finished")
 
+        # Do a full prediction after training if flag is passed
         if opts.full_prediction:
+            print("Generating full prediction on {}".format(opts.data))
+            full_pred = model.predict(np.swapaxes(downsampled_eval_images, 0, 1))
 
-            # Clip downsampled version for display
+            # Clip images for display
             downsampled_eval_images[downsampled_eval_images < 0] = 0
             downsampled_eval_images[downsampled_eval_images > 1] = 1
 
-            print("Generating full prediction on {}".format(opts.data))
-            full_pred = model.predict(np.swapaxes(downsampled_eval_images, 0, 1))
+            full_pred[full_pred < 0] = 0
+            full_pred[full_pred > 1] = 1
+
             np.save(os.path.abspath(os.path.join(opts.save_path, "bicubic.npy")), downsampled_eval_images)
             np.save(os.path.abspath(os.path.join(opts.save_path, "full_prediction.npy")), full_pred)
+
             images.save_array_as_tif(downsampled_eval_images, os.path.abspath(os.path.join(opts.save_path, "bicubic.tif")))
             images.save_array_as_tif(full_pred, os.path.abspath(os.path.join(opts.save_path, "full_prediction.tif")))
             print("Predictions saved")

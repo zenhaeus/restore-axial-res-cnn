@@ -137,7 +137,7 @@ where $\max()$ is the maximum possible pixel value of the given image and $\text
 
 \subsection{Network Architecture}
 \subsubsection{Baseline Network}\label{sec:baseline}
-We started out with the \textit{Isonet-1} architecture, described in \citet{WEIGERT2017} as follows:
+We started out with the \textit{Isonet-2} architecture, described in \citet{WEIGERT2017} as follows:
 \begin{equation}\label{eq:base-model}
     C_{16, 7, 7} - M_{2, 2} - C_{32, 7, 7} - M_{2, 2} - C_{64, 7, 7} - U_{2, 2} - C_{32, 7, 7} - U_{2, 2} - C_{16, 7, 7} - C_{1, 1, 1}
 \end{equation}
@@ -159,7 +159,7 @@ For conventional convolution layers with a filter size of $(w \times h)$, as use
 \end{figure}
 
 \subsubsection{Increasing Network Depth}
-A different approach to reduce memory usage while maintaining a similar receptive field is to increase the depth of the network. If we consider the depth of a convolutional neural network to be the number of convolution layers (excluding the last layer which is the output layer) the Isonet-1 model has a depth of 5. This number can easily be increased by the parameter \texttt{num\_layers}, setting it to $k$ will result in $2k-1$ layers. Each increment of $k$ adds the necessary layers on both the expanding and the contracting part of the U-net architecture. According to \citet{depth} this should allow us to decrease the filter size on each level (and thereby the memory consumption) while maintaining or even improving the model's performance.
+A different approach to reduce memory usage while maintaining a similar receptive field is to increase the depth of the network. If we consider the depth of a convolutional neural network to be the number of convolution layers (excluding the last layer which is the output layer) the Isonet-2 model has a depth of 5. This number can easily be increased by the parameter \texttt{num\_layers}, setting it to $k$ will result in $2k-1$ layers. Each increment of $k$ adds the necessary layers on both the expanding and the contracting part of the U-net architecture. According to \citet{depth} this should allow us to decrease the filter size on each level (and thereby the memory consumption) while maintaining or even improving the model's performance.
 
 \subsection{Hyperparameter Optimization}
 Extensive testing (see \ref{sec:results}) has shown that the performance of the network is very sensitive to the hyperparameters in the training procedure. We have set the learning rate and the epsilon parameter for the Adam optimizer to $10^{-3}$, which appears to yield good convergence rates. However, due to the fact that the training process operates on randomized batches of data, the training $PSNR$-loss varies very strongly (see Figure~\ref{fig:noisy-training}) and has to be smoothed significantly in order to recognize the trend. Increasing the batch size as far as the available GPU memory permits alleviates this effect somewhat.

@@ -29,6 +29,12 @@ def load_data(path, channels=1):
         return None
 
 def save_array_as_tif(array, path):
+    """ Save numpy array as
+
+    array: [num_images, image_height, image_width, num_channel]
+    path: where to save the result as a tif image
+
+    """
     array = img_float_to_uint8(array)
     images = []
     for layer in np.squeeze(array):
@@ -37,15 +43,22 @@ def save_array_as_tif(array, path):
     images[0].save(path, compression="tiff_deflate", save_all=True, append_images=images[1:])
 
 
-def extract_patches(images, patch_size, stride=4, channels=1):
+def extract_patches(images, patch_size, stride=4):
     """Generate patches from an array of images
 
     images:
         array of images
         shape: [num_images, image_width, image_height, num_channel]
+
+    patch_size:
+        extracted patches have dimensions [patch_size, patch_size]
+
+    stride:
+        distance between overlapping extracted patches
+
     """
 
-    z, x, y, _ = images.shape
+    z, x, y, channels = images.shape
     x_starts = range(0, x - patch_size + stride, stride)
     y_starts = range(0, y - patch_size + stride, stride)
     num_patches = len(x_starts)*len(y_starts)*z
@@ -62,10 +75,23 @@ def extract_patches(images, patch_size, stride=4, channels=1):
 
 def downsample(patches, downsample_factor, get_all_patches=True):
     """Generate downsampled version of each patch in patches
+    To downsample the images this function will keep every downsample_factor-th line
+    and drop all other lines.
 
     patches: patches to be downsampled
-    downsample_factor: 
+    downsample_factor: int value indicating by which factor the images should be subsapmled
+    get_all_patches: boolean value indicating whether or not to return all possible downsampled
+        versions of every image.
+
+    returns:
+        if get_all_patches:
+            downsampled images [num_images, int(image_height / downsample_factor), image_width, num_channel]
+        else:
+            downsampled images [downsample_factor * num_images, int(image_height / downsample_factor), image_width, num_channel]
     """
+
+    # if we don't want all patches we just return the first set of subsampled
+    # lines
     if not get_all_patches:
         return patches[:, ::downsample_factor, :]
 
@@ -73,6 +99,8 @@ def downsample(patches, downsample_factor, get_all_patches=True):
     new_shape = list(downsampled_patches.shape)
     new_shape[0] = downsample_factor * new_shape[0]
     new_shape[1] = int(new_shape[1] / downsample_factor)
+
+    # placeholder array for downsampled patches / images
     downsampled_patches = np.resize(downsampled_patches, tuple(new_shape))
 
     for i in range(downsample_factor):
@@ -84,11 +112,18 @@ def downsample(patches, downsample_factor, get_all_patches=True):
     return downsampled_patches
 
 def img_float_to_uint8(img):
-    """Transform an array of float images into uint8 images"""
+    """Transform an array of float images into uint8 images
+
+    img: image to convert to uint8
+    """
     return (img * 255).round().astype(np.uint8)
 
 def img_uint8_to_float(img):
-    """Convert uint8 image to float image
+    """Convert uint8 image to float image and normalize
+    Don't use this on individual images of a 3D image volume
+
+    imgs: [num_images, image_height, image_width, num_channel]
+    returns: img [num_images, image_height, image_width, num_channel] converted and normalized images
     """
     img = np.array(img, dtype=np.float32)
     img -= np.min(img)
@@ -96,9 +131,15 @@ def img_uint8_to_float(img):
     return img
 
 def images_from_patches(patches, image_shape, stride=None):
-    """Generate image from patches
+    """Reassemble image from patches
+
+    patches: patches to transform back into images
+    image_shape: shape of the final image [num_images, image_height, image_width, num_channel]
+    stride: stride that was used to extract patches
+
+    returns: [num_images, images_height, images_width, num_channel] reassembled images
     """
-    num_patches, patch_size, _, num_channel = patches.shape
+    num_patches, patch_size, _, _ = patches.shape
 
     if stride is None:
         stride = patch_size
@@ -108,6 +149,7 @@ def images_from_patches(patches, image_shape, stride=None):
     patches_per_image = int(num_patches / image_shape[0])
 
     images = np.zeros(shape=image_shape, dtype=patches.dtype)
+    #keep track of number of patches that overlap any region in image
     count_hits = np.zeros(shape=image_shape, dtype=np.uint64)
 
     for n in range(0, image_shape[0]):
@@ -120,12 +162,20 @@ def images_from_patches(patches, image_shape, stride=None):
 
     # replace zero counts with 1 to avoid division by 0
     count_hits[count_hits == 0] = 1
+    # normalize image
     images = images / count_hits
 
     return images
 
 def psnr(original, degraded):
     """ Compute the peak signal-to-noise ratio
+
+    The shapes of the 'original' and the 'degraded' array need to be identical.
+
+    original: original image
+    degraded: degraded image
+
+    returns: (float) peak signal to noise ratio
     """
     assert original.shape == degraded.shape, "Shapes of original ({}) and degraded ({}) must be identical to calculate PSNR".format(original.shape, degraded.shape)
 

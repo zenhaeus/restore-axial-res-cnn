@@ -5,7 +5,7 @@ import images
 
 class Summary:
     """
-        Handle tensorflow summaries.
+        This class facilitates and encapsulates the handling of tensorflow summaries.
     """
 
     def __init__(self, options, session):
@@ -19,40 +19,24 @@ class Summary:
 
     def flush(self):
         """
-
+            flush the summary writer
         """
         self._summary_writer.flush()
 
     def add(self, summary_str, global_step=None):
         """
-
+            add a summary to the summary writer
         """
         self._summary_writer.add_summary(summary_str, global_step)
 
     def get_summary_op(self, scalars):
         """
-
+            merge scalar summarys together
         """
         for key, value in scalars.items():
             self.summary_ops.append(tf.summary.scalar(key, value))
 
         return tf.summary.merge(self.summary_ops)
-
-    def initialize_train_summary(self):
-        # TODO: rework this for validation statistics
-        self._train_predictions = tf.placeholder(tf.float32, name="train_predictions")
-        self._train_labels = tf.placeholder(tf.float32, name="train_labels")
-
-        predictions = self._train_predictions
-        labels = self._train_labels
-
-        accuracy, recall, precision, f1_score = self.get_prediction_metrics(labels, predictions)
-
-        self._train_summary = [tf.summary.scalar("train_accuracy", accuracy)]
-        self._train_summary.append(tf.summary.scalar("train_recall", recall))
-        self._train_summary.append(tf.summary.scalar("train_precision", precision))
-        self._train_summary.append(tf.summary.scalar("train_f1_score", f1_score))
-        self._train_summary = tf.summary.merge(self._train_summary)
 
     def initialize_eval_summary(self):
         opts = self._options
@@ -77,19 +61,6 @@ class Summary:
         self._snr_summary = tf.summary.scalar('SNR', self._snr)
 
 
-    def add_to_training_summary(self, predictions, labels, global_step):
-        train_predictions = predictions
-        train_labels = labels
-
-        feed_dict_train = {
-            self._train_predictions: train_predictions,
-            self._train_labels: train_labels
-        }
-
-        train_sum, step = self._session.run([self._train_summary, global_step],
-                                            feed_dict=feed_dict_train)
-        self._summary_writer.add_summary(train_sum, global_step=step)
-
     def add_to_snr_summary(self, snr, global_step):
         snr, step = self._session.run(
                 [self._snr_summary, global_step],
@@ -98,6 +69,9 @@ class Summary:
         self._summary_writer.add_summary(snr, global_step=step)
 
     def add_to_eval_summary(self, groundtruth, downsampled, predictions, global_step):
+        """
+            Add new evaluation summary (grountruth with corresponding downsampled and predicted version)
+        """
         opts = self._options
 
         snr_bicubic = 0.0
@@ -107,15 +81,6 @@ class Summary:
             snr_prediction = images.psnr(groundtruth, predictions)
         print("SNR Bicubic: {}, SNR Prediction: {}".format(snr_bicubic, snr_prediction))
 
-        print("Mean groundtruth:", np.mean(groundtruth))
-        print("Mean downsampled:", np.mean(downsampled))
-        print("Mean predictions:", np.mean(predictions))
-        print("Max groundtruth:", np.max(groundtruth))
-        print("Max downsampled:", np.max(downsampled))
-        print("Max predictions:", np.max(predictions))
-        print("Min groundtruth:", np.min(groundtruth))
-        print("Min downsampled:", np.min(downsampled))
-        print("Min predictions:", np.min(predictions))
         snr_improvement = snr_prediction - snr_bicubic
 
         # Clip downsampled version for display
