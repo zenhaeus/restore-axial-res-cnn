@@ -23,7 +23,7 @@ Use the following command within the `src` directory to run the application
 When running `./tf_restore_axial_res.py` there are a number of flags to influence the behaviour of the training procedure:
 
 | Flag              |      Description |
-|-------------------|------------------|----------------
+|-------------------|------------------|
 | full\_prediction  |      Wheter or not to run a prediction on the full image volume after training |
 | gpu               |      GPU ID on which to run the training procedure |
 | batch\_size       |      Batch size of training instances |
@@ -38,7 +38,7 @@ When running `./tf_restore_axial_res.py` there are a number of flags to influenc
 | conv\_size        |      Filter size of convolution layer |
 | larning\_rate     |      Initial learning rate for Adam Optimizer |
 | dropout           |      Probability to keep an input |
-| 
+|                   |                                   | 
 | logdir            |      Directory where to write logfiles |
 | save\_path        |      Directory where to write checkpoints |
 | data              |      Path to data to learn on |
